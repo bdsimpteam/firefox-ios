@@ -91,17 +91,17 @@ class LeanPlumClient {
 
     // Setup
     private weak var profile: Profile?
+    private var prefs: Prefs? { return profile?.prefs }
     private var enabled: Bool = true
 
-    private var mailPref: String? { return self.profile?.prefs.stringForKey(PrefsKeys.KeyMailToOption) }
-    private var introSeen: Int32? { return self.profile?.prefs.intForKey(IntroViewControllerSeenProfileKey) }
-    private var appAlreadyRquestedAPNS: Bool? { return self.profile?.prefs.boolForKey(AppRequestedUserNotificationsPrefKey) }
-
-    
-    private func shouldSendToLP() -> Bool {
+    private func isPrivateMode() -> Bool {
         // Need to be run on main thread since isInPrivateMode requires to be on the main thread.
         assert(Thread.isMainThread)
-        return enabled && Leanplum.hasStarted() && !UIApplication.isInPrivateMode
+        return UIApplication.isInPrivateMode
+    }
+    
+    private func isLPEnabled() -> Bool {
+        return enabled && Leanplum.hasStarted()
     }
 
     static func shouldEnable(profile: Profile) -> Bool {
@@ -145,7 +145,7 @@ class LeanPlumClient {
 
             // We need to check if the app is a clean install to use for
             // preventing the What's New URL from appearing.
-            if self.introSeen == nil {
+            if self.prefs?.intForKey(IntroViewControllerSeenProfileKey) == nil {
                 self.profile?.prefs.setString(AppInfo.appVersion, forKey: LatestAppVersionProfileKey)
                 self.track(event: .firstRun)
             } else if self.profile?.prefs.boolForKey("SecondRun") == nil {
@@ -160,8 +160,11 @@ class LeanPlumClient {
 
     // Events
     func track(event: LPEvent, withParameters parameters: [String: AnyObject]? = nil) {
-        DispatchQueue.main.ensureMainThread {
-            guard self.shouldSendToLP() else {
+        guard isLPEnabled() else {
+            return
+        }
+        ensureMainThread {
+            guard !self.isPrivateMode() else {
                 return
             }
             if let params = parameters {
@@ -173,8 +176,11 @@ class LeanPlumClient {
     }
 
     func set(attributes: [AnyHashable: Any]) {
-        DispatchQueue.main.ensureMainThread {
-            if self.shouldSendToLP() {
+        guard isLPEnabled() else {
+            return
+        }
+        ensureMainThread {
+            if !self.isPrivateMode() {
                 Leanplum.setUserAttributes(attributes)
             }
         }
@@ -220,7 +226,7 @@ class LeanPlumClient {
     }
 
     private func mailtoIsDefault() -> Bool {
-        return (mailPref ?? "mailto:") == "mailto:"
+        return (prefs?.stringForKey(PrefsKeys.KeyMailToOption) ?? "mailto:") == "mailto:"
     }
 
     private func getSettings() -> LPSettings? {
@@ -256,7 +262,7 @@ class LeanPlumClient {
             }
             
             // Don't display permission screen if they have already allowed/disabled push permissions
-            if self.appAlreadyRquestedAPNS ?? false {
+            if self.prefs?.boolForKey(AppRequestedUserNotificationsPrefKey) ?? false {
                 FxALoginHelper.sharedInstance.readyForSyncing()
                 return false
             }
